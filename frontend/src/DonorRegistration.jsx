@@ -105,11 +105,18 @@ function DonorRegistration({ onRegistered }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [captchaSolved, setCaptchaSolved] = useState(false);
 
+  // GPS coordinates {lat, lng}, or null if the donor typed their area by hand.
+  // We keep them SEPARATE from the text so every donor is stored in the same format.
+  const [coords, setCoords] = useState(null);
+
   // useRef = a box that keeps a value between renders without causing a re-draw
   const captchaBoxRef = useRef(null);       // the <div> where reCAPTCHA is drawn
   const captchaWidgetId = useRef(null);     // lets us reset the CAPTCHA after a failure
   const captchaVerifierRef = useRef(null);  // the Firebase reCAPTCHA object
   const confirmationRef = useRef(null);     // remembers the "code was sent" result
+  // A donor whose phone is verified but whose profile is NOT saved yet.
+  // If saving fails we keep them here, so "try again" does not need a new OTP.
+  const pendingUserRef = useRef(null);
 
   // Draw the reCAPTCHA whenever the form step is shown.
   useEffect(() => {
@@ -148,6 +155,9 @@ function DonorRegistration({ onRegistered }) {
   // Runs every time the user types in a field or ticks a checkbox.
   function handleChange(event) {
     const { name, value, type, checked } = event.target;
+    if (name === "location") {
+      setCoords(null); // the donor edited the place by hand, so old GPS coordinates are no longer correct
+    }
     setValues({
       ...values,
       [name]: type === "checkbox" ? checked : value,
@@ -163,10 +173,9 @@ function DonorRegistration({ onRegistered }) {
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
-        setValues((old) => ({
-          ...old,
-          location: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
-        }));
+        // Rounded to 4 decimals (about 11 metres): precise enough for matching, less exact for privacy
+        setCoords({ lat: Number(latitude.toFixed(4)), lng: Number(longitude.toFixed(4)) });
+        setValues((old) => ({ ...old, location: "Current location (GPS)" }));
         setErrors((old) => ({ ...old, location: undefined }));
       },
       () => {
@@ -238,52 +247,84 @@ function DonorRegistration({ onRegistered }) {
     let createdNow = false; // true if this phone account was created just now
 
     try {
-      // 1) Firebase checks the code. A wrong code throws an error.
-      const result = await confirmationRef.current.confirm(otp);
-      const user = result.user;
-      createdNow = getAdditionalUserInfo(result)?.isNewUser ?? false;
+      // A donor who is already verified (a previous save failed) skips the code check.
+      let user = pendingUserRef.current;
 
-      // 2) If this phone already had an account WITH a donor profile,
-      //    it is a duplicate (FR1: duplicate phone is rejected).
-      if (!createdNow) {
-        const existing = await getDoc(doc(db, "users", user.uid));
-        if (existing.exists()) {
-          await signOut(auth);
-          setStep("form");
-          setErrors({ phone: "This phone number is already registered." });
-          return;
+      if (!user) {
+        // 1) Firebase checks the code. A wrong code throws an error.
+        const result = await confirmationRef.current.confirm(otp);
+        user = result.user;
+        createdNow = getAdditionalUserInfo(result)?.isNewUser ?? false;
+
+        // 2) If this phone already had an account WITH a donor profile,
+        //    it is a duplicate (FR1: duplicate phone is rejected).
+        if (!createdNow) {
+          const existing = await getDoc(doc(db, "users", user.uid));
+          if (existing.exists()) {
+            await signOut(auth);
+            setStep("form");
+            setErrors({ phone: "This phone number is already registered." });
+            return;
+          }
         }
-      }
 
-      // 3) Add the email + password to this verified phone account.
-      //    Throws "auth/email-already-in-use" if the email belongs to someone else.
-      try {
-        await linkWithCredential(
-          user,
-          EmailAuthProvider.credential(values.email.trim(), values.password)
-        );
-      } catch (linkError) {
-        // Already linked from an earlier half-finished attempt: that is fine.
-        if (linkError.code !== "auth/provider-already-linked") throw linkError;
+        // 3) Add the email + password to this verified phone account.
+        //    Throws "auth/email-already-in-use" if the email belongs to someone else.
+        try {
+          await linkWithCredential(
+            user,
+            EmailAuthProvider.credential(values.email.trim(), values.password)
+          );
+        } catch (linkError) {
+          // Already linked from an earlier half-finished attempt: that is fine.
+          if (linkError.code !== "auth/provider-already-linked") throw linkError;
+        }
+
+        // Phone + email are ready. Remember the donor until the profile is saved.
+        pendingUserRef.current = user;
       }
 
       // 4) Save the donor profile in Firestore with role = "Donor".
       //    We never save the password.
-      await setDoc(doc(db, "users", user.uid), {
-        name: values.name.trim(),
-        phone: toInternationalPhone(values.phone),
-        email: values.email.trim(),
-        bloodGroup: values.bloodGroup,
-        location: values.location.trim(),
-        isAvailable: values.isAvailable,
-        alertConsent: values.alertConsent,
-        role: "Donor",
-        createdAt: serverTimestamp(),
-      });
+      //    If this step fails, the account exists but has no profile. We do NOT
+      //    lose the donor: we show a clear message and keep pendingUserRef, so
+      //    pressing the button again only retries the save (no new OTP needed).
+      try {
+        await setDoc(doc(db, "users", user.uid), {
+          name: values.name.trim(),
+          phone: toInternationalPhone(values.phone),
+          email: values.email.trim(),
+          bloodGroup: values.bloodGroup,
+          // Same shape for EVERY donor, so distance matching can use it later:
+          //   text = what the donor typed (or "Current location (GPS)")
+          //   lat / lng = numbers from GPS, or null if typed by hand
+          location: {
+            text: values.location.trim(),
+            lat: coords ? coords.lat : null,
+            lng: coords ? coords.lng : null,
+          },
+          isAvailable: values.isAvailable,
+          // SRS keeps SMS and email preferences separate (FR5 lets the donor change them later).
+          // The sign-up screen has ONE checkbox, so both start with the same value.
+          smsAlerts: values.alertConsent,
+          emailAlerts: values.alertConsent,
+          role: "Donor",
+          createdAt: serverTimestamp(),
+        });
+      } catch (saveError) {
+        console.error("Profile save failed:", saveError);
+        setFormError(
+          "Your phone is verified, but we could not save your profile. " +
+            "Check your internet and press the button again."
+        );
+        return; // stay on this screen so the donor can retry
+      }
 
-      // 5) Done: clear the form and send the donor to the home screen (D01)
+      // 5) Done: clear everything and send the donor to the home screen (D01)
       const donorName = values.name.trim(); // save before clearing
+      pendingUserRef.current = null;
       setValues(EMPTY_FORM);
+      setCoords(null);
       if (onRegistered) {
         onRegistered(donorName);
       }
@@ -350,6 +391,7 @@ function DonorRegistration({ onRegistered }) {
             onClick={() => {
               setStep("form"); // go back, details are kept
               setFormError("");
+              pendingUserRef.current = null; // start the verification again
             }}
           >
             Back
