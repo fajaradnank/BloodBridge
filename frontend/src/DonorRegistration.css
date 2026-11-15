@@ -1,0 +1,126 @@
+/* DonorRegistration.css - strictly compliant with Blood Bridge UI Guide tokens */
+
+.donor-page {
+  min-height: 100vh;
+  background: #F2F6FD; /* --color-blue-50 */
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 24px 16px;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  color: #0F1E3D; /* --color-ink-900 */
+  box-sizing: border-box;
+}
+
+.donor-card {
+  background: #FFFFFF; /* --color-white */
+  width: 100%;
+  max-width: 480px; /* UI Guide Section 5: donor content max 480px */
+  padding: 24px;
+  border-radius: 12px; /* --radius-lg */
+  box-shadow: 0 1px 3px rgba(15, 30, 61, 0.08); /* --shadow-card */
+  box-sizing: border-box;
+  text-align: left;
+}
+
+.donor-title {
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 700;
+  margin: 0 0 20px;
+  color: #0F1E3D;
+}
+
+.donor-field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 16px;
+}
+
+.donor-field label {
+  font-size: 14px;
+  font-weight: 500; /* Label token */
+  margin-bottom: 6px;
+  color: #4B5A78; /* --color-ink-600 */
+}
+
+.donor-field input,
+.donor-field select {
+  font-size: 16px;
+  height: 44px; /* UI Guide Section 8: 44px high inputs */
+  padding: 10px 12px;
+  border: 1px solid #C5CDDC; /* --color-ink-300 */
+  border-radius: 8px; /* --radius-md */
+  background: #FFFFFF;
+  color: #0F1E3D;
+  box-sizing: border-box;
+}
+
+.donor-field input:focus,
+.donor-field select:focus {
+  outline: none;
+  border-color: #1E5BC6; /* --color-blue-600 */
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #1E5BC6; /* --focus-ring */
+}
+
+.donor-location-row {
+  display: flex;
+  gap: 8px;
+}
+
+.donor-error {
+  color: #D92D20; /* --color-red-600 */
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+/* UI Guide Rule: "There is no green, so success states use blue." */
+.donor-success {
+  background: #DCE8FB; /* --color-blue-100 */
+  color: #1747A6; /* --color-blue-700 */
+  border: 1px solid #1E5BC6;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin: 0 0 16px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.donor-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #0F1E3D;
+  margin-bottom: 10px;
+}
+
+.donor-primary-btn {
+  width: 100%;
+  margin-top: 12px;
+  height: 44px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #FFFFFF;
+  background: #1E5BC6; /* --color-blue-600 */
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.donor-primary-btn:hover {
+  background: #1747A6; /* --color-blue-700 */
+}
+
+.donor-secondary-btn {
+  white-space: nowrap;
+  height: 44px;
+  padding: 0 12px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #1E5BC6;
+  background: #FFFFFF;
+  border: 1px solid #1E5BC6;
+  border-radius: 8px;
+  cursor: pointer;
+}
