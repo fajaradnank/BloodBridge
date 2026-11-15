@@ -3,20 +3,25 @@
 // Feature : FR1 - Donor Registration (Trello card "FR1 Donor registration")
 // Wireframe: S02 - Donor sign-up
 //
-// What this file does:
-//   - Shows ONE simple form where a new donor enters their details
-//   - Checks (validates) every field and shows a clear error message
-//   - On success, shows a success message using design tokens
-//
-// What this file does NOT do yet (comes in the next sprint tasks):
-//   - Firebase Authentication (creating the real account)
-//   - Firestore (saving the donor profile with role = "Donor")
-//   - Duplicate email/phone check, redirect to donor home (D01)
+// How registration works now (2 steps on one screen):
+//   STEP "form": donor fills the details, solves the reCAPTCHA, clicks
+//                "Send verification code" -> Firebase texts a 6-digit OTP.
+//   STEP "otp" : donor types the OTP. If it is correct we
+//                  1) link the email + password to the verified phone account
+//                  2) save the donor profile in Firestore with role = "Donor"
+//                  3) send the donor to the home screen (D01)
 // =====================================================================
 
-import { useState } from "react";
-import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, writeBatch, serverTimestamp } from "firebase/firestore";
+import { useEffect, useRef, useState } from "react";
+import {
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
+  EmailAuthProvider,
+  linkWithCredential,
+  getAdditionalUserInfo,
+  signOut,
+} from "firebase/auth";
+import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import "./DonorRegistration.css";
 
@@ -31,10 +36,22 @@ const EMPTY_FORM = {
   password: "",
   bloodGroup: "",
   location: "",
-  isAvailable: true,   // wireframe shows "I am available to donate" ticked by default
-  alertConsent: true,  // wireframe shows "I agree to receive alerts" ticked by default
-  notARobot: false,    // CAPTCHA check
+  isAvailable: true,   // wireframe: "I am available to donate" ticked by default
+  alertConsent: true,  // wireframe: "I agree to receive alerts" ticked by default
 };
+
+// ---------------------------------------------------------------------
+// toInternationalPhone: Firebase needs the phone as +92XXXXXXXXXX.
+// Accepts 03001234567, +923001234567 or 923001234567 (spaces/dashes ignored).
+// Returns null if it is not a valid Pakistani mobile number.
+// ---------------------------------------------------------------------
+function toInternationalPhone(input) {
+  const cleaned = input.replace(/[\s\-()]/g, "");
+  if (/^03\d{9}$/.test(cleaned)) return "+92" + cleaned.slice(1);
+  if (/^\+923\d{9}$/.test(cleaned)) return cleaned;
+  if (/^923\d{9}$/.test(cleaned)) return "+" + cleaned;
+  return null;
+}
 
 // ---------------------------------------------------------------------
 // validateForm: takes the form values and returns an object of errors.
@@ -48,10 +65,9 @@ function validateForm(values) {
     errors.name = "Full name is required (at least 2 characters)";
   }
 
-  // Phone: remove spaces/dashes/+, then it must be 10 to 13 digits only
-  const digitsOnly = values.phone.replace(/[\s\-+]/g, "");
-  if (!/^\d{10,13}$/.test(digitsOnly)) {
-    errors.phone = "Enter a valid phone number (10 to 13 digits)";
+  // Phone: must be a valid Pakistani mobile number
+  if (toInternationalPhone(values.phone) === null) {
+    errors.phone = "Enter a valid mobile number, e.g. 03001234567";
   }
 
   // Email: simple pattern -> something@something.something
@@ -74,21 +90,62 @@ function validateForm(values) {
     errors.location = "Please enter your area or city";
   }
 
-  // CAPTCHA check validation
-  if (!values.notARobot) {
-    errors.notARobot = "Please confirm you are not a robot";
-  }
-
   return errors;
 }
 
-function DonorRegistration() {
+// Used when the page is NOT embedded: onRegistered(name) is given by App.jsx
+// and called after a successful sign-up so App.jsx can show the donor home (D01).
+function DonorRegistration({ onRegistered }) {
   const [values, setValues] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
-  const [submitted, setSubmitted] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false); // true while Firebase is working
-  const [formError, setFormError] = useState("");          // general error shown above the button
+  const [step, setStep] = useState("form");          // "form" or "otp"
+  const [otp, setOtp] = useState("");                // the 6-digit code typed by the donor
+  const [otpError, setOtpError] = useState("");
+  const [formError, setFormError] = useState("");    // general error (e.g. no internet)
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [captchaSolved, setCaptchaSolved] = useState(false);
 
+  // useRef = a box that keeps a value between renders without causing a re-draw
+  const captchaBoxRef = useRef(null);       // the <div> where reCAPTCHA is drawn
+  const captchaWidgetId = useRef(null);     // lets us reset the CAPTCHA after a failure
+  const captchaVerifierRef = useRef(null);  // the Firebase reCAPTCHA object
+  const confirmationRef = useRef(null);     // remembers the "code was sent" result
+
+  // Draw the reCAPTCHA whenever the form step is shown.
+  useEffect(() => {
+    if (step !== "form" || !captchaBoxRef.current) return;
+
+    try {
+      const verifier = new RecaptchaVerifier(auth, captchaBoxRef.current, {
+        size: "normal",
+        callback: () => setCaptchaSolved(true),          // donor solved it
+        "expired-callback": () => setCaptchaSolved(false), // it timed out
+      });
+      captchaVerifierRef.current = verifier;
+      verifier.render().then((id) => {
+        captchaWidgetId.current = id;
+      });
+
+      // Cleanup: remove the CAPTCHA when leaving this step
+      return () => {
+        verifier.clear();
+        setCaptchaSolved(false);
+      };
+    } catch (error) {
+      console.error("Could not show reCAPTCHA:", error);
+      setFormError("Could not load the CAPTCHA. Please refresh the page.");
+    }
+  }, [step]);
+
+  // A CAPTCHA token can be used only once, so reset it after any failure.
+  function resetCaptcha() {
+    if (window.grecaptcha && captchaWidgetId.current !== null) {
+      window.grecaptcha.reset(captchaWidgetId.current);
+    }
+    setCaptchaSolved(false);
+  }
+
+  // Runs every time the user types in a field or ticks a checkbox.
   function handleChange(event) {
     const { name, value, type, checked } = event.target;
     setValues({
@@ -121,44 +178,100 @@ function DonorRegistration() {
     );
   }
 
-  // async = this function waits for Firebase (internet) before moving on
-  async function handleSubmit(event) {
+  // ---------------------------------------------------------------
+  // STEP 1: validate the form, check the CAPTCHA, send the SMS code.
+  // ---------------------------------------------------------------
+  async function handleSendCode(event) {
     event.preventDefault();
     setFormError("");
 
     const foundErrors = validateForm(values);
+    if (!captchaSolved) {
+      foundErrors.captcha = "Please complete the CAPTCHA";
+    }
     setErrors(foundErrors);
+    if (Object.keys(foundErrors).length > 0) return;
 
-    if (Object.keys(foundErrors).length > 0) {
-      setSubmitted(false);
+    setIsSubmitting(true);
+    try {
+      // Firebase checks the CAPTCHA and texts a 6-digit code to the phone
+      confirmationRef.current = await signInWithPhoneNumber(
+        auth,
+        toInternationalPhone(values.phone),
+        captchaVerifierRef.current
+      );
+      setOtp("");
+      setOtpError("");
+      setStep("otp"); // show the "enter your code" screen
+    } catch (error) {
+      resetCaptcha();
+      if (error.code === "auth/invalid-phone-number") {
+        setErrors({ phone: "This phone number is not valid." });
+      } else if (error.code === "auth/too-many-requests") {
+        setFormError("Too many attempts. Please wait a while and try again.");
+      } else if (error.code === "auth/network-request-failed") {
+        setFormError("No internet connection. Please try again.");
+      } else if (error.code === "auth/billing-not-enabled") {
+        setFormError("SMS is not enabled for this project yet (see Firebase plan).");
+      } else {
+        console.error("Could not send code:", error);
+        setFormError("Could not send the code. Please try again.");
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // STEP 2: check the OTP, then create the donor's account + profile.
+  // ---------------------------------------------------------------
+  async function handleVerifyCode(event) {
+    event.preventDefault();
+    setFormError("");
+
+    if (!/^\d{6}$/.test(otp)) {
+      setOtpError("Enter the 6-digit code");
       return;
     }
 
     setIsSubmitting(true);
-    let newUser = null; // remembered so we can undo it if a later step fails
+    let createdNow = false; // true if this phone account was created just now
 
     try {
-      // STEP 1 (FR1 criterion 4): create the login account in Firebase Authentication.
-      // If the email is already used, Firebase throws "auth/email-already-in-use".
-      const credential = await createUserWithEmailAndPassword(
-        auth,
-        values.email.trim(),
-        values.password
-      );
-      newUser = credential.user;
+      // 1) Firebase checks the code. A wrong code throws an error.
+      const result = await confirmationRef.current.confirm(otp);
+      const user = result.user;
+      createdNow = getAdditionalUserInfo(result)?.isNewUser ?? false;
 
-      // Phone saved as digits only, e.g. "+92 300-1234567" -> "923001234567"
-      const phoneDigits = values.phone.replace(/[\s\-+]/g, "");
+      // 2) If this phone already had an account WITH a donor profile,
+      //    it is a duplicate (FR1: duplicate phone is rejected).
+      if (!createdNow) {
+        const existing = await getDoc(doc(db, "users", user.uid));
+        if (existing.exists()) {
+          await signOut(auth);
+          setStep("form");
+          setErrors({ phone: "This phone number is already registered." });
+          return;
+        }
+      }
 
-      // STEP 2 (FR1 criterion 5): save the donor profile in Firestore with role = "Donor".
-      // We write two documents together (a "batch"): both succeed or both fail.
-      //   users/{uid}      -> the donor profile
-      //   phones/{digits}  -> a marker so the same phone cannot register twice
-      // (criterion 6: if phones/{digits} already exists, Firestore rejects the batch)
-      const batch = writeBatch(db);
-      batch.set(doc(db, "users", newUser.uid), {
+      // 3) Add the email + password to this verified phone account.
+      //    Throws "auth/email-already-in-use" if the email belongs to someone else.
+      try {
+        await linkWithCredential(
+          user,
+          EmailAuthProvider.credential(values.email.trim(), values.password)
+        );
+      } catch (linkError) {
+        // Already linked from an earlier half-finished attempt: that is fine.
+        if (linkError.code !== "auth/provider-already-linked") throw linkError;
+      }
+
+      // 4) Save the donor profile in Firestore with role = "Donor".
+      //    We never save the password.
+      await setDoc(doc(db, "users", user.uid), {
         name: values.name.trim(),
-        phone: phoneDigits,
+        phone: toInternationalPhone(values.phone),
         email: values.email.trim(),
         bloodGroup: values.bloodGroup,
         location: values.location.trim(),
@@ -167,48 +280,92 @@ function DonorRegistration() {
         role: "Donor",
         createdAt: serverTimestamp(),
       });
-      batch.set(doc(db, "phones", phoneDigits), { uid: newUser.uid });
-      await batch.commit();
 
-      setSubmitted(true);
+      // 5) Done: clear the form and send the donor to the home screen (D01)
+      const donorName = values.name.trim(); // save before clearing
       setValues(EMPTY_FORM);
-      // TODO (criterion 7): redirect to the donor home screen (D01)
+      if (onRegistered) {
+        onRegistered(donorName);
+      }
     } catch (error) {
-      setSubmitted(false);
-
-      if (error.code === "auth/email-already-in-use") {
-        // Duplicate email (criterion 6)
+      if (error.code === "auth/invalid-verification-code") {
+        setOtpError("Wrong code. Please check the SMS and try again.");
+      } else if (error.code === "auth/code-expired") {
+        setOtpError("This code has expired. Go back and request a new one.");
+      } else if (error.code === "auth/email-already-in-use") {
+        // Undo the phone account we just made so the phone can be used again
+        if (createdNow && auth.currentUser) {
+          await auth.currentUser.delete();
+        } else {
+          await signOut(auth);
+        }
+        setStep("form");
         setErrors({ email: "This email is already registered. Please log in instead." });
-      } else if (error.code === "auth/weak-password") {
-        setErrors({ password: "Password is too weak. Use at least 8 characters." });
       } else if (error.code === "auth/network-request-failed") {
         setFormError("No internet connection. Please try again.");
-      } else if (newUser && error.code === "permission-denied") {
-        // The login account was created but the phone already exists, so the Firestore
-        // write was refused (criterion 6). Delete the half-created account so the
-        // person can try again with another phone number.
-        await newUser.delete();
-        setErrors({ phone: "This phone number is already registered." });
       } else {
         console.error("Registration failed:", error);
         setFormError("Something went wrong. Please try again.");
       }
     } finally {
-      setIsSubmitting(false); // always re-enable the button
+      setIsSubmitting(false);
     }
   }
 
+  // ===============================================================
+  // SCREEN 2: enter the OTP
+  // ===============================================================
+  if (step === "otp") {
+    return (
+      <div className="donor-page">
+        <form className="donor-card" onSubmit={handleVerifyCode} noValidate>
+          <h1 className="donor-title">Enter your code</h1>
+          <p className="donor-hint">
+            We sent a 6-digit code by SMS to {values.phone}.
+          </p>
+
+          <div className="donor-field">
+            <label htmlFor="otp">Verification code</label>
+            <input
+              id="otp"
+              name="otp"
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              value={otp}
+              onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
+              placeholder="6-digit code"
+            />
+            {otpError && <span className="donor-error">{otpError}</span>}
+          </div>
+
+          {formError && <p className="donor-error">{formError}</p>}
+
+          <button type="submit" className="donor-primary-btn" disabled={isSubmitting}>
+            {isSubmitting ? "Verifying..." : "Verify and create account"}
+          </button>
+          <button
+            type="button"
+            className="donor-link-btn"
+            onClick={() => {
+              setStep("form"); // go back, details are kept
+              setFormError("");
+            }}
+          >
+            Back
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  // ===============================================================
+  // SCREEN 1: the registration form
+  // ===============================================================
   return (
     <div className="donor-page">
-      <form className="donor-card" onSubmit={handleSubmit} noValidate>
+      <form className="donor-card" onSubmit={handleSendCode} noValidate>
         <h1 className="donor-title">Become a donor</h1>
-
-        {/* Success message using design tokens (Blue tint, no green per UI guide) */}
-        {submitted && (
-          <p className="donor-success" role="status">
-            Donor registered successfully!
-          </p>
-        )}
 
         {/* ---------- Full name ---------- */}
         <div className="donor-field">
@@ -325,18 +482,10 @@ function DonorRegistration() {
           I agree to receive alerts by SMS / email
         </label>
 
-        {/* ---------- CAPTCHA Placeholder (CR-01) ---------- */}
+        {/* ---------- Real reCAPTCHA (Google draws it inside this box) ---------- */}
         <div className="donor-field" style={{ marginTop: "8px" }}>
-          <label className="donor-checkbox">
-            <input
-              type="checkbox"
-              name="notARobot"
-              checked={values.notARobot}
-              onChange={handleChange}
-            />
-            I am not a robot (CAPTCHA)
-          </label>
-          {errors.notARobot && <span className="donor-error">{errors.notARobot}</span>}
+          <div ref={captchaBoxRef}></div>
+          {errors.captcha && <span className="donor-error">{errors.captcha}</span>}
         </div>
 
         {/* General error (e.g. no internet) */}
@@ -344,7 +493,7 @@ function DonorRegistration() {
 
         {/* ---------- Submit (disabled while waiting for Firebase) ---------- */}
         <button type="submit" className="donor-primary-btn" disabled={isSubmitting}>
-          {isSubmitting ? "Creating account..." : "Create account"}
+          {isSubmitting ? "Sending code..." : "Send verification code"}
         </button>
       </form>
     </div>
