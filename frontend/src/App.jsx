@@ -1,16 +1,39 @@
-
 import { useState } from "react";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 
+import S01Landing from "./S01Landing"; // NEW IMPORT
 import Login from "./Login";
 import ForgotPassword from "./ForgotPassword";
 import ResetPassword from "./ResetPassword";
 import DonorRegistration from "./DonorRegistration";
 import DonorHome from "./DonorHome";
+import AdminPage from "./admin/AdminPage"; 
 
 import { auth, db } from "./firebase";
 import "./Login.css";
+
+// --- TEMPORARY S04 PLACEHOLDER (Until Aleena's code is merged) ---
+function S04Placeholder({ org, onLogout }) {
+  const isRejected = org?.status?.toLowerCase().includes("reject");
+  return (
+    <main className="login-page" style={{ background: "var(--color-blue-50)" }}>
+      <section className="login-card" style={{ textAlign: "center", borderRadius: "var(--radius-lg)", padding: "var(--space-8)" }}>
+        <h1>{isRejected ? "Registration Rejected" : "Registration Submitted"}</h1>
+        <p>{org?.name}</p>
+        <div style={{ padding: "12px", background: isRejected ? "var(--color-red-100)" : "var(--color-blue-100)", color: isRejected ? "var(--color-red-700)" : "var(--color-blue-700)", borderRadius: "8px", margin: "16px 0" }}>
+          <strong>Status: </strong> {org?.status || "Pending Approval"}
+        </div>
+        {isRejected && org?.rejectionReason && (
+          <p style={{ color: "var(--color-red-600)" }}><strong>Reason: </strong> {org.rejectionReason}</p>
+        )}
+        <button type="button" className="login-submit" onClick={onLogout} style={{ marginTop: "24px" }}>
+          Log out
+        </button>
+      </section>
+    </main>
+  );
+}
 
 const ROLE_DESTINATIONS = {
   donor: "D01",
@@ -20,217 +43,194 @@ const ROLE_DESTINATIONS = {
   bloodbankstaff: "B01",
 };
 
-const DASHBOARD_NAMES = {
-  H01: "Hospital Staff Dashboard",
-  HA01: "Hospital Admin Dashboard",
-  A01: "Platform Admin Dashboard",
-  B01: "Blood Bank Staff Dashboard",
-};
-
 function normalizeRole(role = "") {
   return String(role).toLowerCase().replace(/[\s_-]/g, "");
 }
 
 function App() {
+  // Default to "landing" so the cover page shows first!
   const [screen, setScreen] = useState(() => {
     const params = new URLSearchParams(window.location.search);
-
-    return params.get("mode") === "resetPassword" &&
-      params.get("oobCode")
-      ? "reset"
-      : "login";
+    if (params.get("mode") === "resetPassword" && params.get("oobCode")) return "reset";
+    return "landing"; 
   });
 
   const [destination, setDestination] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [orgProfile, setOrgProfile] = useState(null);
   const [registeredDonorName, setRegisteredDonorName] = useState("");
   const [loading, setLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
 
-  // Authenticate the user and redirect according to their Firestore role.
   async function handleLogin(user) {
     setLoading(true);
     setLoginError("");
 
     try {
-      const userSnapshot = await getDoc(
-        doc(db, "users", user.uid)
-      );
+      const userSnapshot = await getDoc(doc(db, "users", user.uid));
+      let role = "";
+      let userProfileData = {};
 
-      if (!userSnapshot.exists()) {
-        throw new Error(
-          "Your account profile was not found. Please contact the administrator."
-        );
+      if (userSnapshot.exists()) {
+        userProfileData = userSnapshot.data();
+        role = normalizeRole(userProfileData.role);
+      } else {
+        const orgQuery = query(collection(db, "organisations"), where("email", "==", user.email));
+        const orgSnapshot = await getDocs(orgQuery);
+
+        if (!orgSnapshot.empty) {
+          const orgData = orgSnapshot.docs[0].data();
+          userProfileData = orgData;
+          role = orgData.type === "bloodbank" ? "bloodbankstaff" : "hospitaladmin";
+        } else {
+          throw new Error("Your account profile was not found. Please contact the administrator.");
+        }
       }
 
-      const userProfile = userSnapshot.data();
-      const role = normalizeRole(userProfile.role);
       const target = ROLE_DESTINATIONS[role];
 
       if (!target) {
-        throw new Error(
-          "Your account has an unrecognized role. Please contact the administrator."
-        );
+        throw new Error("Your account has an unrecognized role. Please contact the administrator.");
       }
 
-      setProfile(userProfile);
+      if (["hospitaladmin", "hospitalstaff", "bloodbankstaff"].includes(role)) {
+        const orgQuery = query(collection(db, "organisations"), where("email", "==", user.email));
+        const orgSnapshot = await getDocs(orgQuery);
+        
+        if (!orgSnapshot.empty) {
+          setOrgProfile({ id: orgSnapshot.docs[0].id, ...orgSnapshot.docs[0].data() });
+        } else {
+          setOrgProfile(null);
+        }
+      }
+
+      setProfile(userProfileData);
       setDestination(target);
     } catch (error) {
       console.error("Login redirect failed:", error);
-
-      setLoginError(
-        error.message || "Unable to load your account. Please try again."
-      );
-
+      setLoginError(error.message || "Unable to load your account. Please try again.");
       await signOut(auth);
     } finally {
       setLoading(false);
     }
   }
 
-  // Sign out and return to the login screen.
   async function handleLogout() {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error("Logout failed:", error);
-    }
-
+    try { await signOut(auth); } catch (error) { console.error(error); }
     setDestination(null);
     setProfile(null);
+    setOrgProfile(null);
     setRegisteredDonorName("");
     setLoginError("");
-    setScreen("login");
-
-    window.history.replaceState(
-      {},
-      document.title,
-      window.location.pathname
-    );
+    setScreen("landing"); // Go back to cover page
+    window.history.replaceState({}, document.title, window.location.pathname);
   }
 
-  // Registration success integration. FR1 implementation remains unchanged.
+  // --- RENDER LOGIC ---
+
   if (registeredDonorName) {
     return (
       <>
         <DonorHome name={registeredDonorName} />
-
         <div className="login-page">
-          <button
-            type="button"
-            className="login-submit"
-            onClick={handleLogout}
-          >
-            Log out
-          </button>
+          <button className="login-submit" onClick={handleLogout}>Log out</button>
         </div>
       </>
     );
   }
 
-  // Display the appropriate destination after successful login.
   if (destination) {
+    // 1. DONOR
     if (destination === "D01") {
       return (
         <>
           <DonorHome name={profile?.name || "Donor"} />
-
-          <div className="login-page">
-            <button
-              type="button"
-              className="login-submit"
-              onClick={handleLogout}
-            >
-              Log out
-            </button>
-          </div>
+          <div className="login-page"><button className="login-submit" onClick={handleLogout}>Log out</button></div>
         </>
       );
     }
 
-    return (
-      <main className="login-page">
-        <section className="login-card">
-          <div className="login-heading">
-            <h1>{DASHBOARD_NAMES[destination]}</h1>
+    // 2. ADMIN
+    if (destination === "A01") {
+      return <AdminPage onLogout={handleLogout} />; 
+    }
 
-            <p>
-              Welcome
-              {profile?.name ? `, ${profile.name}` : ""}.
-              You are signed in.
-            </p>
+    // 3. HOSPITAL / BLOOD BANK
+    if (["HA01", "H01", "B01"].includes(destination)) {
+      if (orgProfile) {
+        const status = String(orgProfile.status || "").toLowerCase();
+        if (status.includes("pending") || status.includes("reject")) {
+           return <S04Placeholder org={orgProfile} onLogout={handleLogout} />;
+        }
+      }
 
-            <p>Screen: {destination}</p>
-          </div>
-
-          <button
-            type="button"
-            className="login-submit"
-            onClick={handleLogout}
-          >
-            Log out
-          </button>
-        </section>
-      </main>
-    );
+      return (
+        <main className="login-page" style={{ background: "var(--color-blue-50)" }}>
+          <section className="login-card" style={{ borderRadius: "var(--radius-lg)", padding: "var(--space-8)" }}>
+            <div className="login-heading" style={{ textAlign: "center" }}>
+              <h1>{destination === "B01" ? "Blood Bank Dashboard" : "Hospital Dashboard"}</h1>
+              <p>Welcome{profile?.name ? `, ${profile.name}` : ""}. You are signed in.</p>
+              <p>Screen: {destination}</p>
+              <p style={{ color: "var(--color-blue-600)" }}>Status: Approved</p>
+            </div>
+            <button type="button" className="login-submit" onClick={handleLogout}>Log out</button>
+          </section>
+        </main>
+      );
+    }
   }
 
   if (loading) {
     return (
       <main className="login-page">
-        <section className="login-card">
-          <h1>Loading your account...</h1>
-        </section>
+        <section className="login-card"><h1>Loading your account...</h1></section>
       </main>
     );
   }
 
+  // --- SCREEN ROUTING ---
+
+  // 4. S01 LANDING PAGE (Cover Page)
+  if (screen === "landing") {
+    return (
+      <S01Landing 
+        onDonate={() => setScreen("register")}
+        onRegisterOrg={() => alert("Hospital/Blood Bank Registration (S03) will go here.")}
+        onLogin={() => setScreen("login")}
+      />
+    );
+  }
+
+  // 5. DONOR REGISTRATION (FR1)
   if (screen === "register") {
     return (
       <div>
-        <DonorRegistration
-          onRegistered={setRegisteredDonorName}
-        />
-
-        <button
-          type="button"
-          onClick={() => setScreen("login")}
-        >
-          Back to Login
-        </button>
+        <DonorRegistration onRegistered={setRegisteredDonorName} />
+        <div style={{ textAlign: "center", marginTop: "16px" }}>
+          <button type="button" onClick={() => setScreen("landing")} style={{ background: "none", border: "none", color: "var(--color-blue-600)", cursor: "pointer" }}>
+            Back to Home
+          </button>
+        </div>
       </div>
     );
   }
 
-  if (screen === "forgot") {
-    return (
-      <ForgotPassword
-        onBack={() => setScreen("login")}
-      />
-    );
-  }
-
-  if (screen === "reset") {
-    return (
-      <ResetPassword
-        onBack={() => setScreen("login")}
-      />
-    );
-  }
+  if (screen === "forgot") return <ForgotPassword onBack={() => setScreen("login")} />;
+  if (screen === "reset") return <ResetPassword onBack={() => setScreen("login")} />;
 
   return (
     <>
-      {loginError && (
-        <p className="login-error" role="alert">
-          {loginError}
-        </p>
-      )}
-
+      {loginError && <p className="login-error" role="alert">{loginError}</p>}
       <Login
         onLogin={handleLogin}
         onShowRegister={() => setScreen("register")}
         onForgotPassword={() => setScreen("forgot")}
       />
+      <div style={{ textAlign: "center", marginTop: "15px" }}>
+        <button type="button" onClick={() => setScreen("landing")} style={{ background: "none", border: "none", color: "var(--color-blue-600)", cursor: "pointer", textDecoration: "underline" }}>
+          Back to Cover Page
+        </button>
+      </div>
     </>
   );
 }
