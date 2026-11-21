@@ -140,9 +140,9 @@ export default function AdminApprovals({ onLogout }) {
                     <td data-label="Organization">{org.name}</td>
                     <td data-label="Type">{typeLabel(org.type)}</td>
                     <td data-label="Submitted">
-                      <span>{formatDate(org.createdAt)}</span>{" "}
-                      <span className="muted">{timeAgo(org.createdAt)}</span>
-                    </td>
+  <span>{formatDate(org.createdAt)}</span>{" "}
+  <span className="muted">{timeAgo(org.createdAt)}</span>
+</td>
                     <td className="action-cell">
                       <button
                         className="btn btn-secondary"

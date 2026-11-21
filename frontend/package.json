@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@emailjs/browser": "^5.0.3",
     "firebase": "^13.3.0",
     "lucide-react": "^1.75.0",
     "react": "^19.3.1",

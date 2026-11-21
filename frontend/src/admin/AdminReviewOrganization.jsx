@@ -68,8 +68,7 @@ export default function AdminReviewOrganization({ org, onBack, onDecided }) {
           <Field label="Registration no." value={org.registrationNo} />
           <Field label="License no." value={org.licenseNo} />
           <Field label="Contact person" value={org.contactPerson} />
-          <Field label="Account holder" value={org.accountHolder} />
-          <dt>Status</dt>
+<Field label="Account holder" value={org.accountHolderName || org.accountHolder} />          <dt>Status</dt>
           <dd><StatusBadge status={status} /></dd>
         </dl>
 
