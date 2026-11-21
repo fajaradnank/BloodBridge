@@ -1,0 +1,69 @@
+/* Styles for FR2.1 (S03/S04). Everything is prefixed with org- and the design tokens
+   live on .org-page, so nothing here can change other people's screens. */
+.org-page {
+  --color-white:#FFFFFF; --color-blue-50:#F2F6FD; --color-blue-100:#DCE8FB;
+  --color-blue-600:#1E5BC6; --color-blue-700:#1747A6;
+  --color-red-100:#FEE4E2; --color-red-600:#D92D20; --color-red-700:#B42318;
+  --color-ink-900:#0F1E3D; --color-ink-600:#4B5A78;
+  --color-ink-300:#C5CDDC; --color-ink-100:#EEF1F6;
+  --font-sans:"Inter", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px;
+  --space-6:24px; --space-8:32px; --space-12:48px; --space-16:64px;
+  --radius-md:8px; --radius-lg:12px; --radius-pill:999px;
+  --shadow-card:0 1px 3px rgba(15,30,61,.08);
+  --focus-ring:0 0 0 2px #fff, 0 0 0 4px var(--color-blue-600);
+}
+.org-page { position:fixed; inset:0; overflow-y:auto; box-sizing:border-box; display:flex; justify-content:center; align-items:flex-start; padding:var(--space-8) var(--space-4); background:var(--color-blue-50); color:var(--color-ink-900); font-family:var(--font-sans); text-align:left; color-scheme:light; }
+.org-card { width:480px; max-width:100%; background:var(--color-white); border-radius:var(--radius-lg);
+  box-shadow:var(--shadow-card); padding:var(--space-6); align-self:flex-start; }
+.org-card h1 { font:700 24px/32px var(--font-sans); margin:0 0 var(--space-1); }
+.org-card .org-sub { color:var(--color-ink-600); font:400 14px/20px var(--font-sans); margin:0 0 var(--space-6); }
+.org-field { margin-bottom:var(--space-4); }
+.org-field label { display:block; font:500 14px/20px var(--font-sans); margin-bottom:var(--space-1); }
+.org-field input, .org-field select { width:100%; box-sizing:border-box; height:40px; padding:0 var(--space-3);
+  font:400 16px/24px var(--font-sans); color:var(--color-ink-900); background:var(--color-white);
+  border:1px solid var(--color-ink-300); border-radius:var(--radius-md); }
+.org-field input:focus, .org-field select:focus, .org-btn:focus-visible, .org-drop:focus-within { outline:none; box-shadow:var(--focus-ring); }
+.org-field.org-has-error input, .org-field.org-has-error select { border-color:var(--color-red-600); }
+.org-field .org-err { color:var(--color-red-700); font:400 14px/20px var(--font-sans); margin-top:var(--space-1); }
+.org-field .org-hint { color:var(--color-ink-600); font:400 14px/20px var(--font-sans); margin-top:var(--space-1); }
+.org-pw-row { position:relative; }
+.org-pw-row button { position:absolute; right:var(--space-2); top:var(--space-1); height:32px; border:0; background:none;
+  color:var(--color-blue-600); font:500 14px/20px var(--font-sans); cursor:pointer; }
+.org-drop { display:block; border:2px dashed var(--color-ink-300); border-radius:var(--radius-md); padding:var(--space-4);
+  text-align:center; color:var(--color-ink-600); cursor:pointer; font:400 14px/20px var(--font-sans); }
+.org-drop input { display:none; }
+.org-file-row { display:flex; justify-content:space-between; align-items:center; padding:var(--space-2) 0;
+  font:400 14px/20px var(--font-sans); border-bottom:1px solid var(--color-ink-100); }
+.org-file-row button { border:0; background:none; color:var(--color-red-600); cursor:pointer; font:500 14px/20px var(--font-sans); }
+.org-btn { width:100%; height:48px; border:0; border-radius:var(--radius-md); background:var(--color-blue-600);
+  color:var(--color-white); font:600 16px/24px var(--font-sans); cursor:pointer; margin-top:var(--space-2); }
+.org-btn:hover { background:var(--color-blue-700); }
+.org-btn:disabled { background:var(--color-ink-100); color:var(--color-ink-300); cursor:not-allowed; }
+.org-banner-error { background:var(--color-red-100); color:var(--color-red-700); border-radius:var(--radius-md);
+  padding:var(--space-3); margin-bottom:var(--space-4); font:400 14px/20px var(--font-sans); }
+.org-badge { display:inline-block; padding:var(--space-1) var(--space-3); border-radius:var(--radius-pill);
+  background:var(--color-blue-100); color:var(--color-blue-700); font:500 12px/16px var(--font-sans); }
+.org-center { text-align:center; }
+.org-stepper { display:flex; justify-content:space-between; margin:var(--space-6) 0; font:400 14px/20px var(--font-sans); }
+.org-step { flex:1; text-align:center; color:var(--color-ink-600); }
+.org-step i { display:block; width:16px; height:16px; margin:0 auto var(--space-2); border-radius:50%; border:2px solid var(--color-ink-300); }
+.org-step.org-done i { background:var(--color-blue-600); border-color:var(--color-blue-600); }
+.org-step.org-current i { border-color:var(--color-blue-600); box-shadow:0 0 0 3px var(--color-blue-100); }
+.org-btn-secondary { background:var(--color-white); color:var(--color-blue-600); border:1px solid var(--color-blue-600); }
+.org-btn-secondary:hover { background:var(--color-blue-50); }
+
+/* ---- Safety block: stops the project's global styles (index.css) from changing how this
+   screen looks. Text is always left-aligned and dark, per the UI guide. ---- */
+.org-page, .org-page * { box-sizing:border-box; }
+.org-page .org-card { background:var(--color-white); color:var(--color-ink-900); text-align:left; margin:0; }
+.org-page .org-card h1 { color:var(--color-ink-900); text-align:left; font-size:24px; line-height:32px; font-weight:700; margin:0 0 var(--space-1); }
+.org-page .org-card .org-sub { color:var(--color-ink-600); text-align:left; margin:0 0 var(--space-6); }
+.org-page .org-card label { color:var(--color-ink-900); text-align:left; display:block; }
+.org-page .org-card .org-drop { color:var(--color-ink-600); text-align:center; }
+.org-page .org-card input, .org-page .org-card select { color:var(--color-ink-900); background:var(--color-white); text-align:left; }
+.org-page .org-card .org-hint { color:var(--color-ink-600); text-align:left; }
+.org-page .org-card .org-err { color:var(--color-red-700); text-align:left; }
+.org-page .org-card .org-file-row span { color:var(--color-ink-900); }
+/* Status screen (S04) is the one place where centered text is intended */
+.org-page .org-card.org-center, .org-page .org-card.org-center h1, .org-page .org-card.org-center .org-sub { text-align:center; }
