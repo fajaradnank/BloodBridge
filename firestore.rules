@@ -1,0 +1,75 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '').lower() == 'platformadmin';
+    }
+
+    // True only for an organisation whose status is approved (FR3)
+    function isApprovedOrg() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/organisations/$(request.auth.uid))
+        && get(/databases/$(database)/documents/organisations/$(request.auth.uid)).data.get('status', '').lower() == 'approved';
+    }
+
+    // ---------- users ----------
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+
+      // Self-registration is donor-only (blocks self-made admin/hospital/blood bank roles)
+      allow create: if signedIn() && request.auth.uid == uid
+                    && request.resource.data.get('role', '').lower() == 'donor';
+
+      allow update: if signedIn() && request.auth.uid == uid
+                    && request.resource.data.get('role', '') == resource.data.get('role', '');
+    }
+
+    // ---------- organisations ----------
+    match /organisations/{orgId} {
+      // A new registration must be your own record AND start as pending (FR2.1)
+      allow create: if signedIn()
+                    && request.auth.uid == orgId
+                    && request.resource.data.get('status', '').lower().matches('pending.*');
+
+      allow read: if isAdmin()
+                  || (signedIn() && request.auth.uid == orgId)
+                  || (signedIn() && resource.data.get('ownerUid', '') == request.auth.uid)
+                  || (signedIn() && resource.data.get('email', '') == request.auth.token.email);
+
+      // Only the admin can change status (approve / reject)
+      allow update: if isAdmin();
+
+      // OPTIONAL for the resubmit follow-up (FR2.1): uncomment when you build it.
+      // Lets a rejected org edit its details, but only to put itself back to pending.
+      // allow update: if signedIn() && request.auth.uid == orgId
+      //               && resource.data.get('status', '').lower() == 'rejected'
+      //               && request.resource.data.get('status', '').lower() == 'pending';
+    }
+
+    // ---------- template for operational features (FR3) ----------
+    // Locked orgs (pending/rejected) cannot create or fulfil requests.
+    // Rename to your real collections when you build them.
+    match /requests/{requestId} {
+      allow read, create, update: if isApprovedOrg() || isAdmin();
+    }
+
+    // TEMPORARY: open so donor registration (phone duplicate check) keeps working.
+    match /phones/{phoneId} {
+      allow read, write: if true;
+    }
+
+    // TEMPORARY: open for the OTP demo. Anyone can read codes, so this is NOT secure.
+    // Real fix: send and verify OTP in a Cloud Function.
+    match /otp_codes/{email} {
+      allow read, write: if true;
+    }
+  }
+}
